@@ -1,0 +1,148 @@
+using UnityEngine;
+
+public class MonkeyShooter : MonoBehaviour
+{
+    [Header("1. การตั้งค่าจุดยิงกระสุน")]
+    [Tooltip("จุดยิง (สร้าง Empty GameObject เป็นลูกของลิงแล้วลากมาใส่ หรือปล่อยว่างไว้ให้ระบบคำนวณให้อัตโนมัติ)")]
+    public Transform firePoint;
+
+    [Tooltip("ระยะห่างจุดยิงออกจากตัวลิง (ใช้กรณีไม่ได้ใส่ FirePoint เพื่อป้องกันกระสุนชนตัวลิงแล้วฉีกขึ้นฟ้า)")]
+    public float shootOffset = 0.8f;
+
+    [Header("2. ตั้งค่ากระสุนและการยิง")]
+    [Tooltip("Prefab ของกระสุน")]
+    public GameObject bulletPrefab;
+
+    [Tooltip("ความเร็วในการยิงกระสุน")]
+    public float shootForce = 15f;
+
+    [Tooltip("อายุกระสุน (วินาที) ก่อนลบตัวเองอัตโนมัติ")]
+    public float bulletLifeTime = 5f;
+
+    [Header("3. ตั้งค่า Collider ป้องกันการชนตัวเอง")]
+    [Tooltip("Collider ของตัวลิง (ถ้าไม่ใส่ ระบบจะดึงจากตัวมันเองให้อัตโนมัติ)")]
+    public Collider2D monkeyCollider;
+
+    private Camera mainCamera;
+
+    private void Start()
+    {
+        mainCamera = Camera.main;
+
+        // ดึง Collider2D ของลิงอัตโนมัติถ้าไม่ได้ลากมาใส่
+        if (monkeyCollider == null)
+        {
+            monkeyCollider = GetComponent<Collider2D>();
+        }
+    }
+
+    private void Update()
+    {
+        // ยิงเมื่อคลิกเมาส์ซ้าย (หรือแตะหน้าจอ)
+        if (Input.GetMouseButtonDown(0))
+        {
+            Shoot();
+        }
+    }
+
+    private void Shoot()
+    {
+        if (bulletPrefab == null)
+        {
+            Debug.LogWarning("กรุณาใส่ Bullet Prefab ใน Inspector ของ MonkeyShooter!");
+            return;
+        }
+
+        // ============================================================
+        // ขั้นตอนที่ 1: แปลงพิกัดเมาส์จาก Screen Space เป็น World Space
+        // ============================================================
+        Vector3 mouseScreenPos = Input.mousePosition;
+        Vector3 targetWorldPos = mainCamera.ScreenToWorldPoint(mouseScreenPos);
+        targetWorldPos.z = 0f; // ล็อคแกน Z เป็น 0 เสมอสำหรับเกม 2D
+
+        // ============================================================
+        // ขั้นตอนที่ 2: กำหนดพิกัดจุดเริ่มยิง (Spawn Position)
+        // ============================================================
+        Vector3 spawnPosition;
+        
+        if (firePoint != null)
+        {
+            // ใช้พิกัดจากจุด FirePoint ที่กำหนดไว้
+            spawnPosition = firePoint.position;
+        }
+        else
+        {
+            // ถ้าไม่มี FirePoint ให้คำนวณพิกัดเยื้องออกจากตัวลิงไปทางเป้าหมายโดยอัตโนมัติ
+            Vector2 dirToMouse = ((Vector2)targetWorldPos - (Vector2)transform.position).normalized;
+            spawnPosition = transform.position + (Vector3)(dirToMouse * shootOffset);
+        }
+
+        // ============================================================
+        // ขั้นตอนที่ 3: คำนวณทิศทางยิง (Normalize เวกเตอร์)
+        // ============================================================
+        Vector2 shootDirection = ((Vector2)targetWorldPos - (Vector2)spawnPosition).normalized;
+
+        // คำนวณมุมหมุนกระสุนให้หันหน้าไปทางเป้าหมาย
+        float angle = Mathf.Atan2(shootDirection.y, shootDirection.x) * Mathf.Rad2Deg;
+        Quaternion rotation = Quaternion.Euler(0, 0, angle);
+
+        // ============================================================
+        // ขั้นตอนที่ 4: สร้างกระสุน (Instantiate)
+        // ============================================================
+        GameObject bullet = Instantiate(bulletPrefab, spawnPosition, rotation);
+
+        // ============================================================
+        // ขั้นตอนที่ 5: ป้องกันการชนกันเองระหว่างลิงกับกระสุน (แก้อาการฉีกขึ้นฟ้า)
+        // ============================================================
+        Collider2D bulletCollider = bullet.GetComponent<Collider2D>();
+        if (bulletCollider != null && monkeyCollider != null)
+        {
+            Physics2D.IgnoreCollision(bulletCollider, monkeyCollider);
+        }
+
+        // ============================================================
+        // ขั้นตอนที่ 6: ใส่ความเร็วให้กระสุนพุ่งไปตามทิศทาง
+        // ============================================================
+        Rigidbody2D rb = bullet.GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.velocity = shootDirection * shootForce;
+        }
+
+        // ============================================================
+        // ขั้นตอนที่ 7: ระบบทำลายกระสุนอัตโนมัติเมื่อชนสิ่งกีดขวาง/หมดเวลา
+        // ============================================================
+        if (bullet.GetComponent<BulletBehavior>() == null)
+        {
+            bullet.AddComponent<BulletBehavior>(); // ใส่สคริปต์ตรวจจับการชนให้อัตโนมัติ
+        }
+
+        Destroy(bullet, bulletLifeTime); // ลบกระสุนเมื่อหมดเวลา
+    }
+
+    // วาดจุดยิงในหน้า Scene View ให้เห็นตำแหน่งชัดเจน
+    private void OnDrawGizmos()
+    {
+        Vector3 pos = firePoint != null ? firePoint.position : transform.position;
+        Gizmos.color = Color.red;
+        Gizmos.DrawSphere(pos, 0.15f);
+    }
+}
+
+// ============================================================
+// สคริปต์ช่วยทำลายกระสุนเมื่อชนวัตถุอื่น (รวมอยู่ในไฟล์เดียวกันได้)
+// ============================================================
+public class BulletBehavior : MonoBehaviour
+{
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        // ทำลายกระสุนทันทีเมื่อชนวัตถุอื่น
+        Destroy(gameObject);
+    }
+
+    private void OnTriggerEnter2D(Collider2D collider)
+    {
+        // ทำลายกระสุนกรณีตั้งค่า Collider เป็น Is Trigger
+        Destroy(gameObject);
+    }
+}
